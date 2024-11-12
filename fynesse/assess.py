@@ -158,8 +158,8 @@ def plot_feature_correlation_heatmap(df, feature_columns):
 # Practical 2 Exercise 8
 
 def plot_buildings(latitude, longitude, tags, distance_km, place_name):
-  box_width = distance_km * 2 / 2.2 * 0.02  # Adjust based on approximation for 1km x 1km area
-  box_height = distance_km * 2 / 2.2 * 0.02
+  box_width = distance_km / 2.2 * 0.02  # Adjust based on approximation for 1km x 1km area
+  box_height = distance_km / 2.2 * 0.02
   north = latitude + box_height / 2
   south = latitude - box_width / 2
   west = longitude - box_width / 2

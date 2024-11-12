@@ -101,8 +101,8 @@ def select_houses_from_database(conn, latitude, longitude, distance_km = 1.0, da
         pd.DataFrame: DataFrame containing house data within the specified area and date range.
     """
 
-    box_width = distance_km * 2 / 2.2 * 0.02 # 2.2 km = 0.02 box units
-    box_height = distance_km * 2 / 2.2 * 0.02
+    box_width = distance_km / 2.2 * 0.02 # 2.2 km = 0.02 box units
+    box_height = distance_km / 2.2 * 0.02
 
     # Create a cursor object
     cur = conn.cursor()
@@ -146,8 +146,8 @@ def return_pois_near_coordinates_full_addr(latitude: float, longitude: float, ta
     """
 
     # Define the bounding box
-    box_width = distance_km * 2 / 2.2 * 0.02  # Adjust based on approximation for 1km x 1km area
-    box_height = distance_km * 2 / 2.2 * 0.02
+    box_width = distance_km / 2.2 * 0.02  # Adjust based on approximation for 1km x 1km area
+    box_height = distance_km / 2.2 * 0.02
     north = latitude + box_height / 2
     south = latitude - box_width / 2
     west = longitude - box_width / 2
