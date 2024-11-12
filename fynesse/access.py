@@ -3,6 +3,8 @@ import requests
 import pymysql
 import time
 import csv
+import pandas as pd
+import osmnx as ox
 
 """These are the types of import we might expect in this file
 import httplib2
@@ -80,3 +82,90 @@ def housing_upload_join_data(conn, year):
   print('Storing data for year: ' + str(year))
   cur.execute(f"LOAD DATA LOCAL INFILE '" + csv_file_path + "' INTO TABLE `prices_coordinates_data` FIELDS TERMINATED BY ',' OPTIONALLY ENCLOSED by '\"' LINES STARTING BY '' TERMINATED BY '\n';")
   print('Data stored for year: ' + str(year))
+  conn.commit()
+
+# Practical 2 Exercise 7
+
+def select_houses_from_database(conn, latitude, longitude, distance_km = 1.0, date_from='2020-01-01'):
+    """
+    Retrieve house data from the database within a specified radius around a latitude and longitude.
+
+    Args:
+        conn: Database connection object created using fynesse library.
+        latitude (float): Central latitude for the search area.
+        longitude (float): Central longitude for the search area.
+        distance_km (float): Radius in km around the latitude and longitude to search.
+        date (str): Minimum date of transfer to filter the records. Default is '2020-01-01'.
+
+    Returns:
+        pd.DataFrame: DataFrame containing house data within the specified area and date range.
+    """
+
+    box_width = distance_km * 2 / 2.2 * 0.02 # 2.2 km = 0.02 box units
+    box_height = distance_km * 2 / 2.2 * 0.02
+
+    # Create a cursor object
+    cur = conn.cursor()
+
+    # Execute the query
+    cur.execute(
+        f"""
+        SELECT * FROM prices_coordinates_data_2 
+        WHERE latitude BETWEEN {latitude - box_width / 2} AND {latitude + box_width / 2}
+        AND longitude BETWEEN {longitude - box_height / 2} AND {longitude + box_height / 2}
+        AND date_of_transfer >= '{date_from}';
+        """
+    )
+
+    # Fetch all results and column names
+    rows = cur.fetchall()
+    columns = [desc[0] for desc in cur.description]
+
+    # Convert to DataFrame
+    df = pd.DataFrame(rows, columns=columns)
+
+    # Close the cursor
+    cur.close()
+
+    return df
+
+# Practical 2 Exercise 8
+
+def return_pois_near_coordinates_full_addr(latitude: float, longitude: float, tags: dict, distance_km: float = 1.0) -> pd.DataFrame:
+    """
+    Retrieve Points of Interest (POIs) near a given pair of coordinates within a specified distance.
+
+    Args:
+        latitude (float): Latitude of the location.
+        longitude (float): Longitude of the location.
+        tags (dict): A dictionary of OSM tags to filter the POIs (e.g., {'amenity': True, 'building': True}).
+        distance_km (float): The distance around the location in kilometers. Default is 1 km.
+
+    Returns:
+        pd.DataFrame: A DataFrame of POIs with relevant attributes for each tag.
+    """
+
+    # Define the bounding box
+    box_width = distance_km * 2 / 2.2 * 0.02  # Adjust based on approximation for 1km x 1km area
+    box_height = distance_km * 2 / 2.2 * 0.02
+    north = latitude + box_height / 2
+    south = latitude - box_width / 2
+    west = longitude - box_width / 2
+    east = longitude + box_width / 2
+
+    # Fetch the POIs within the bounding box
+    pois = ox.geometries_from_bbox(north, south, east, west, tags)
+
+    # Convert to DataFrame
+    pois_df = pd.DataFrame(pois)
+
+    # Filter the DataFrame for relevant columns (if available)
+    if 'addr:housenumber' in pois_df.columns and 'addr:street' in pois_df.columns:
+        pois_df = pois_df.dropna(subset=['addr:housenumber', 'addr:street'])
+        pois_df = pois_df[['addr:housenumber', 'addr:street', 'addr:postcode', 'geometry']]
+    else:
+        pois_df = pois_df.reset_index(drop=True)
+
+    pois_df['geometry_area'] = pois_df['geometry'].apply(lambda geom: geom.area)
+
+    return pois_df
