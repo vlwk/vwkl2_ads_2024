@@ -155,6 +155,45 @@ def plot_feature_correlation_heatmap(df, feature_columns):
     plt.title("Feature Correlation Matrix")
     plt.show()
 
+# Practical 2 Exercise 8
+
+def plot_buildings(latitude, longitude, tags, distance_km, place_name):
+  box_width = distance_km * 2 / 2.2 * 0.02  # Adjust based on approximation for 1km x 1km area
+  box_height = distance_km * 2 / 2.2 * 0.02
+  north = latitude + box_height / 2
+  south = latitude - box_width / 2
+  west = longitude - box_width / 2
+  east = longitude + box_width / 2
+  graph = ox.graph_from_bbox(north, south, east, west)
+  pois = ox.geometries_from_bbox(north, south, east, west, tags)
+  pois_with_address = pois[(pois['addr:housenumber'].notnull()) & (pois['addr:street'].notnull())]
+  pois_without_address = pois[(pois['addr:housenumber'].isnull()) | (pois['addr:street'].isnull())]
+
+# Retrieve nodes and edges
+  nodes, edges = ox.graph_to_gdfs(graph)
+
+# Get place boundary related to the place name as a geodataframe
+  area = ox.geocode_to_gdf(place_name)
+
+  fig, ax = plt.subplots()
+
+  # Plot the footprint
+  area.plot(ax=ax, facecolor="white")
+
+    # Plot street edges
+  edges.plot(ax=ax, linewidth=1, edgecolor="dimgray")
+
+  ax.set_xlim([west, east])
+  ax.set_ylim([south, north])
+  ax.set_xlabel("longitude")
+  ax.set_ylabel("latitude")
+
+  # Plot all POIs 
+  pois_with_address.plot(ax=ax, color="blue", alpha=0.7, markersize=10,label="with address")
+  pois_without_address.plot(ax=ax, color="purple", alpha=0.7, markersize=10,label="without address")
+  plt.tight_layout()
+
+
 # Practical 2 Exercise 9
 
 # Define a function to calculate similarity score
@@ -197,6 +236,27 @@ def plot_price_vs_area(df):
   plt.xlabel('Geometry Area (m²)')
   plt.ylabel('Price')
   plt.show()
+
+def remove_outliers_iqr(df, column):
+    Q1 = df[column].quantile(0.25)
+    Q3 = df[column].quantile(0.75)
+    IQR = Q3 - Q1
+    lower_bound = Q1 - 1.5 * IQR
+    upper_bound = Q3 + 1.5 * IQR
+    return df[(df[column] >= lower_bound) & (df[column] <= upper_bound)]
+
+def plot_price_vs_area_outliers_removed(df):
+    # Remove outliers from both 'geometry_area' and 'price'
+    df_no_outliers = remove_outliers_iqr(df, 'geometry_area')
+    df_no_outliers = remove_outliers_iqr(df_no_outliers, 'price')
+
+    # Plot without outliers
+    plt.figure(figsize=(8, 6))
+    sns.regplot(x='geometry_area', y='price', data=df_no_outliers, scatter_kws={'s': 10}, line_kws={'color': 'red'})
+    plt.title('Price vs Area of Property (Outliers Removed)')
+    plt.xlabel('Geometry Area (m²)')
+    plt.ylabel('Price')
+    plt.show()
 
 def data():
     """Load the data from access and ensure missing values are correctly encoded as well as indices correct, column names informative, date and times correctly formatted. Return a structured data structure such as a data frame."""
