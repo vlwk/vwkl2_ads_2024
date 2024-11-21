@@ -312,6 +312,13 @@ import matplotlib.pyplot as plt
 
 # Prac 3 Question 7
 
+import numpy as np
+from sklearn.model_selection import KFold
+from sklearn.metrics import mean_squared_error, r2_score
+from sklearn.linear_model import LassoCV, RidgeCV
+import statsmodels.api as sm
+import matplotlib.pyplot as plt
+
 def kfoldcrossval(ts062_df, ycol):
 
   # Data preparation
@@ -320,6 +327,10 @@ def kfoldcrossval(ts062_df, ycol):
 
   # Values of k to test
   k_values = [2, 5, 10, 20]
+
+  coefficients_ols = {k: [] for k in k_values}
+  coefficients_lasso = {k: [] for k in k_values}
+  coefficients_ridge = {k: [] for k in k_values}
 
   # Dictionaries to store results
   train_mse_results_ols = []
@@ -363,16 +374,19 @@ def kfoldcrossval(ts062_df, ycol):
           model_ols = sm.OLS(y_train, X_train_with_intercept).fit()
           y_train_pred_ols = model_ols.predict(X_train_with_intercept)
           y_test_pred_ols = model_ols.predict(X_test_with_intercept)
+          coefficients_ols[k].append(model_ols.params)
 
           train_mse_list_ols.append(mean_squared_error(y_train, y_train_pred_ols))
           test_mse_list_ols.append(mean_squared_error(y_test, y_test_pred_ols))
           train_r2_list_ols.append(r2_score(y_train, y_train_pred_ols))
           test_r2_list_ols.append(r2_score(y_test, y_test_pred_ols))
+          
 
           # Lasso Model
           model_lasso = LassoCV(alphas=np.logspace(-4, 1, 50), cv=5, max_iter=10000, random_state=42).fit(X_train_with_intercept, y_train)
           y_train_pred_lasso = model_lasso.predict(X_train_with_intercept)
           y_test_pred_lasso = model_lasso.predict(X_test_with_intercept)
+          coefficients_lasso[k].append(model_lasso.coef_)
 
           train_mse_list_lasso.append(mean_squared_error(y_train, y_train_pred_lasso))
           test_mse_list_lasso.append(mean_squared_error(y_test, y_test_pred_lasso))
@@ -383,6 +397,7 @@ def kfoldcrossval(ts062_df, ycol):
           model_ridge = RidgeCV(alphas=np.logspace(-4, 1, 50), cv=5).fit(X_train_with_intercept, y_train)
           y_train_pred_ridge = model_ridge.predict(X_train_with_intercept)
           y_test_pred_ridge = model_ridge.predict(X_test_with_intercept)
+          coefficients_ridge[k].append(model_ridge.coef_)
 
           train_mse_list_ridge.append(mean_squared_error(y_train, y_train_pred_ridge))
           test_mse_list_ridge.append(mean_squared_error(y_test, y_test_pred_ridge))
@@ -466,10 +481,39 @@ def kfoldcrossval(ts062_df, ycol):
   plt.grid(True)
   plt.show()
 
+  # --- Plot Coefficients for Each k ---
+  for k in k_values:
+      fig, ax = plt.subplots(1, 3, figsize=(15, 5), sharey=True)
+
+      # OLS Coefficients
+      ax[0].plot(np.array(coefficients_ols[k]).T, marker='o')
+      ax[0].set_title(f'OLS Coefficients (k={k})')
+      ax[0].set_xlabel('Coefficient Index')
+      ax[0].set_ylabel('Coefficient Value')
+
+      # Lasso Coefficients
+      ax[1].plot(np.array(coefficients_lasso[k]).T, marker='x')
+      ax[1].set_title(f'Lasso Coefficients (k={k})')
+      ax[1].set_xlabel('Coefficient Index')
+
+      # Ridge Coefficients
+      ax[2].plot(np.array(coefficients_ridge[k]).T, marker='s')
+      ax[2].set_title(f'Ridge Coefficients (k={k})')
+      ax[2].set_xlabel('Coefficient Index')
+
+      fig.suptitle(f'Coefficient Paths for k={k}')
+      plt.tight_layout()
+      plt.show()
 
 
 # Practical 3 Question 8
 
+
+# Use this box for any code you need
+
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.linear_model import RidgeCV
 
 def ridgecoeff_age(ts062_df):
 
@@ -528,8 +572,7 @@ def ridgecoeff_age(ts062_df):
   plt.tight_layout()
   plt.show()
 
-
-
+  return coefficients_by_age_ols, coefficients_by_age_ridge
 
 # Prac 3 Question 9
 
