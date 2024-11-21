@@ -22,6 +22,8 @@ import seaborn as sns
 import osmnx as ox
 from fuzzywuzzy import fuzz
 
+
+
 # Practical 2 Exercise 1
 
 def count_osm_features(locations_dict: dict, tags: dict) -> pd.DataFrame:
@@ -274,3 +276,35 @@ def view(data):
 def labelled(data):
     """Provide a labelled set of data ready for supervised learning."""
     raise NotImplementedError
+
+
+# Practical 3 Exercise 1
+
+def extract_census_data_into_df(code, level='ltla'):
+  download_census_data(code)
+  age_df = load_census_data(code, level=level)
+  age_df = age_df.drop(age_df.columns[[0,2,3,4,10,16,23,28,34,45,61,77,88,99,115]], axis=1).set_index('geography')
+  age_df.columns = range(100)
+  return age_df
+
+# Practical 3 Exercise 1
+
+def rbf_kernel(x, centres, length_scale=10.0):
+    """Generate RBF basis functions."""
+    return np.exp(-((x[:, None] - centres[None, :]) ** 2) / (2 * length_scale ** 2))
+
+# Practical 3 Exercise 4
+
+
+
+def augment_df_with_norm_age(norm_age_df, ts062_df):
+  ts062_df = ts062_df.merge(norm_age_df[21], left_on='geography', right_index=True, how='left')
+  for i in range(0, 100):
+    if (i != 21 and (i not in ts062_df.columns)):
+      ts062_df = ts062_df.merge(norm_age_df[i], left_on='geography', right_index=True, how='left')
+  colname_l15 = ts062_df.columns[12]
+  print(colname_l15)
+  for i in range(4, 13):
+    ts062_df['col' + str(i-3) + '_proportion'] = ts062_df[ts062_df.columns[i]] / ts062_df[ts062_df.columns[3]]
+  return ts062_df
+
