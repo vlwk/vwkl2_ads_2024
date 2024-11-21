@@ -278,14 +278,6 @@ def labelled(data):
     raise NotImplementedError
 
 
-# Practical 3 Exercise 1
-
-def extract_census_data_into_df(code, level='ltla'):
-  download_census_data(code)
-  age_df = load_census_data(code, level=level)
-  age_df = age_df.drop(age_df.columns[[0,2,3,4,10,16,23,28,34,45,61,77,88,99,115]], axis=1).set_index('geography')
-  age_df.columns = range(100)
-  return age_df
 
 # Practical 3 Exercise 1
 
