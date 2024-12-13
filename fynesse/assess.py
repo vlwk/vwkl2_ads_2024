@@ -21,6 +21,336 @@ from scipy.spatial.distance import pdist, squareform
 import seaborn as sns
 import osmnx as ox
 from fuzzywuzzy import fuzz
+import ast
+from sklearn.metrics import mean_squared_error, r2_score
+from sklearn.linear_model import LassoCV, RidgeCV
+import statsmodels.api as sm
+import numpy as np
+from sklearn.model_selection import KFold
+
+# final project 
+
+def add_geo_from_lat_long(df):
+    # turns a points df into a gdf with a geo col 
+    df2 = df.copy()
+    transformer = Transformer.from_crs("epsg:4326", "epsg:27700", always_xy=True)
+    bng_e, bng_n = transformer.transform(df2['longitude'].values, df2['latitude'].values)
+    df2['geometry'] = [Point(e, n) for e, n in zip(bng_e, bng_n)]
+    gdf = gpd.GeoDataFrame(df2, geometry='geometry',crs="EPSG:27700")
+    return gdf
+
+def tags_to_dict(df):
+    df2 = df.copy()
+    df2['tags_dict'] = df2['tags'].apply(ast.literal_eval)
+    return df2
+
+def is_valid_literal(val):
+    try:
+        ast.literal_eval(val)
+        return True
+    except (ValueError, SyntaxError):
+        return False
+
+def normalise_dict(gdf, tag_dict):
+    # takes a gdf and a tags dict {k:v} and makes each k or k_v a col
+    chunk_size = 50000
+    total_rows = gdf.shape[0]
+    chunks = range(0, total_rows, chunk_size)
+    tags_dfs = []
+    print("Starting batch processing...")
+    for start in tqdm(chunks, desc="Processing chunks"):
+        end = min(start + chunk_size, total_rows)
+        chunk = gdf.iloc[start:end]
+        tags_df = pd.json_normalize(chunk["tags_dict"])
+        tags_df = tags_df.reindex(columns=list(tag_dict.keys()), fill_value=None)
+        tags_dfs.append(tags_df)
+    tags_df = pd.concat(tags_dfs, ignore_index=True)
+    expanded_gdf = pd.concat([gdf, tags_df], axis=1)
+    return expanded_gdf
+
+def add_counts_to_boundaries(boundaries, points, tags, lvl): # gdf is for gdf boundaries
+    ret = boundaries.copy()
+    num_pts = points.groupby(lvl).size().reset_index(name="num_pts")
+    ret = ret.merge(num_pts, on=lvl, how="left")
+    ret["num_pts"] = ret["num_pts"].fillna(0).astype(int) 
+    for f, v in tags.items():
+        if (len(v) == 0):
+            filtered_pts = points[~points[f].isna()]
+            point_counts = filtered_pts.groupby(lvl).size().reset_index(name=f+"_count")
+            ret = ret.merge(point_counts, on=lvl, how="left")
+            ret[f + "_count"] = ret[f + "_count"].fillna(0).astype(int)
+            ret[f + "_by_area"] = (ret[f + "_count"] / ret["area"]).fillna(0) * 100
+        else:
+            for value in v:
+                filtered_pts = points[points[f] == value]
+                point_counts = filtered_pts.groupby(lvl).size().reset_index(name=f+ "_" + value + "_count")
+                ret = ret.merge(point_counts, on=lvl, how="left")
+                ret[f + "_" + value + "_count"] = ret[f + "_" + value + "_count"].fillna(0).astype(int)
+                ret[f + "_" + value + "_by_area"] = (ret[f + "_" + value + "_count"] / ret["area"]).fillna(0) * 100
+    return ret
+
+def basic_y_against_x(feature, x_suff, y_label, df):
+    
+
+    x = df[feature + x_suff]
+    y = df[y_label]
+    
+    # Add a constant column to include the intercept
+    X = sm.add_constant(x)  
+    
+    # Fit a simple linear model
+    m_linear = sm.OLS(y, X)
+    results = m_linear.fit()
+    
+    # Predictions
+    x_pred = np.linspace(0, x.max(), 200)  # Range of x values for prediction
+    X_pred = sm.add_constant(x_pred)  # Add intercept to prediction matrix
+    
+    y_pred_linear = results.get_prediction(X_pred).summary_frame(alpha=0.05)
+    
+    # Plotting
+    fig = plt.figure(figsize=(6, 4))
+    ax = fig.add_subplot(111)
+    ax.scatter(x, y, label="Data", zorder=2)
+    
+    # Linear model predictions
+    ax.plot(x_pred, y_pred_linear['mean'], color='red', linestyle='--', label="Mean Prediction", zorder=1)
+    ax.plot(x_pred, y_pred_linear['obs_ci_lower'], color='red', linestyle='-', label="Confidence Interval", zorder=1)
+    ax.plot(x_pred, y_pred_linear['obs_ci_upper'], color='red', linestyle='-', zorder=1)
+    ax.fill_between(
+      x_pred,
+      y_pred_linear['obs_ci_lower'],
+      y_pred_linear['obs_ci_upper'],
+      color='red',
+      alpha=0.3,
+      zorder=1
+    )
+    
+    ax.set_ylim(bottom=0)
+    ax.set_xlabel(feature + x_suff)
+    ax.set_ylabel(y_label)
+    ax.legend()
+    plt.tight_layout()
+    plt.show()
+    
+    # Print summary of the model
+    print(results.rsquared)
+
+
+
+def get_ols_model(df_x, df_y):
+    ols_model = sm.OLS(df_y, df_x)
+    ols_model_fitted = ols_model.fit()
+    print(ols_model_fitted.summary())
+    return ols_model_fitted
+
+def get_lasso_model(df_x, df_y):
+    lasso_model = LassoCV(cv=5, random_state=42).fit(df_x, df_y)
+    print("Optimal alpha (regularisation strength):", lasso_model.alpha_)
+    return lasso_model
+
+def get_ridge_model(df_x, df_y):
+    ridge_model = RidgeCV(alphas=[0.1, 1.0, 10.0], cv=5).fit(df_x, df_y)
+    print("Optimal alpha (regularisation strength):", ridge_model.alpha_)
+    return ridge_model
+
+def pred(df_x, df_y, model):
+    y_pred = model.predict(df_x)
+    mse = mean_squared_error(df_y, y_pred)
+    r2 = r2_score(df_y, y_pred)
+    return y_pred, mse, r2
+
+def plot_pred_vs_actual_index(y_actual, y_pred, label):
+    fig = plt.figure(figsize = (6, 4))
+    ax = fig.add_subplot(111)
+    ax.scatter(np.arange(len(y_actual)), y_actual, label = "Actual", color = "black", zorder = 2)
+    ax.plot(
+        np.arange(len(y_pred)),
+        y_pred,
+        label = "Predicted",
+        color = "blue",
+        linestyle = "--",
+        zorder = 1,
+    )
+    ax.set_xlabel("Index")
+    ax.set_ylabel(label)
+    ax.legend()
+    plt.tight_layout()
+    plt.show()
+
+def scale_x(X_combined_df):
+    scaler = StandardScaler()
+    X_combined_scaled = scaler.fit_transform(X_combined_df)
+    X_combined_scaled_df = pd.DataFrame(X_combined_scaled, columns=X_combined_df.columns)
+    X_combined_scaled_with_int_df = sm.add_constant(X_combined_scaled_df)
+    return X_combined_scaled_with_int_df, scaler
+
+def pca_transform_with_int(x_scaled):
+    
+    pca = PCA()
+    X_pca = pca.fit_transform(x_scaled)
+    
+    explained_variance = pca.explained_variance_ratio_
+    cumulative_variance = np.cumsum(explained_variance)
+    
+    plt.figure(figsize=(8, 6))
+    plt.plot(range(1, len(explained_variance) + 1), cumulative_variance, marker='o', linestyle='--')
+    plt.xlabel('Number of Principal Components')
+    plt.ylabel('Cumulative Explained Variance')
+    plt.title('Explained Variance by Principal Components')
+    plt.grid()
+    plt.show()
+    
+    n_components = np.argmax(cumulative_variance >= 0.95) + 1
+    print(f"Number of components to retain 95% variance: {n_components}")
+    
+    pca = PCA(n_components=n_components)
+    X_reduced = pca.fit_transform(x_scaled)
+
+    X_reduced_with_int = sm.add_constant(X_reduced)
+    column_labels = ['const'] + [f'x{i}' for i in range(X_reduced.shape[1])]
+
+    X_reduced_df = pd.DataFrame(X_reduced_with_int, columns=column_labels)
+
+    loadings = pd.DataFrame(
+        pca.components_,
+        columns=x_scaled.columns, 
+        index=[f'PC{i+1}' for i in range(pca.n_components_)]
+    )
+    print("Feature Loadings (PCA Coefficients):")
+    print(loadings)
+    
+    plt.figure(figsize=(12, 8))
+
+
+    for i in range(loadings.shape[0]):
+        plt.figure(figsize=(10, 6))
+        plt.bar(loadings.columns, loadings.iloc[i], color='blue')
+        plt.xlabel('Features')
+        plt.ylabel('PCA Coefficient (Loading)')
+        plt.title(f'PCA Loadings for PC{i+1}')
+        plt.xticks(rotation=45)
+        plt.grid()
+        plt.show()
+
+
+
+    return X_reduced_df, pca.components_
+
+def reg(y_label, X_pca, df):
+    
+    ols_model_fitted = get_ols_model(X_pca, df[y_label])
+    y_pred, mse, r2 = pred(X_pca, df[y_label], ols_model_fitted)
+    plot_pred_vs_actual_index(df[y_label], y_pred, y_label)
+    print("mean squared error OLS: ", mse)
+    
+    lasso_model_fitted = get_lasso_model(X_pca, df[y_label])
+    y_pred, mse, r2 = pred(X_pca, df[y_label], lasso_model_fitted)
+    plot_pred_vs_actual_index(df[y_label], y_pred, y_label)
+    print("mean squared error Lasso: ", mse)
+    print("r-squared value Lasso: ", r2)
+    print("coeffs Lasso: ", lasso_model_fitted.coef_)
+    
+    ridge_model_fitted = get_ridge_model(X_pca, df[y_label])
+    y_pred, mse, r2 = pred(X_pca, df[y_label], ridge_model_fitted)
+    plot_pred_vs_actual_index(df[y_label], y_pred, y_label)
+    print("mean squared error Ridge: ", mse)
+    print("r-squared value Ridge: ", r2)
+    print("coeffs Ridge: ", ridge_model_fitted.coef_)
+
+    return ols_model_fitted, lasso_model_fitted, ridge_model_fitted
+
+
+
+
+# task 1 specific
+def prepare_features(tags_flattened, df, x_suff):
+    X_combined = []
+    feature_names = []
+    for feature in tags_flattened:
+        x = df[feature + x_suff]
+        X_combined.append(x) 
+        feature_names.extend([feature + x_suff])
+    X_combined_df = pd.DataFrame(np.column_stack(X_combined), columns=feature_names)
+    return X_combined_df
+
+
+
+
+# task 2 specific
+
+def prepare_features_pt2(tags_flattened, df):
+    X_combined = []
+    feature_names = []
+    for feature in tags_flattened:
+        x_2011 = df[feature + "_count_2011"]
+        x_2021 = df[feature + "_count_2021"]
+
+        x_change = x_2021 - x_2011
+        
+        X_combined.append(x_2011)
+        # X_combined.append(x_2021)
+
+        X_combined.append(x_change)
+        
+        # feature_names.extend([feature + "_count_2011", feature + "_count_2021"])
+
+        feature_names.extend([feature + "_count_2011", feature + "_2011_to_2021"])
+    
+    X_combined_df = pd.DataFrame(np.column_stack(X_combined), columns=feature_names)
+    return X_combined_df
+
+def merge_2011_and_2021(df1, df2):
+    omit_cols = ['LAD24CD', 'LAD24NM', 'LAD24NMW', 'BNG_E', 'BNG_N', 'LONG', 'LAT',
+       'geometry', 'area', 'average_price_2011', 'average_price_2021',
+       'average_price_change', 'average_price_change_pct', 'ea_pct_2011',
+       'ea_2011', 'ea_pct_2021', 'ea_2021', 'ea_change']
+    rename_mapping_df1 = {col: f"{col}_2011" for col in df1.columns if col not in omit_cols}
+    rename_mapping_df2 = {col: f"{col}_2021" for col in df2.columns if col not in omit_cols}
+    df1_renamed = df1.rename(columns=rename_mapping_df1)
+    df2_renamed = df2.rename(columns=rename_mapping_df2)
+    df_combined = pd.merge(df1_renamed, df2_renamed, on=['LAD24CD','ea_change','average_price_change','ea_2011','ea_2021','average_price_2011','average_price_2021'], how='inner')
+    return df_combined
+
+
+
+def kfold_cross_validation(X, y, model_function, k_values):
+    train_minus_test_mse = []
+
+    for k in k_values:
+        kf = KFold(n_splits=k, shuffle=True, random_state=42)
+        train_mse, test_mse = [], []
+
+        for train_index, test_index in kf.split(X):
+            X_train, X_test = X.iloc[train_index], X.iloc[test_index]
+            y_train, y_test = y.iloc[train_index], y.iloc[test_index]
+
+            model = model_function(X_train, y_train)
+            y_train_pred = model.predict(X_train)
+            y_test_pred = model.predict(X_test)
+
+            train_mse.append(mean_squared_error(y_train, y_train_pred))
+            test_mse.append(mean_squared_error(y_test, y_test_pred))
+
+        avg_train_mse = np.mean(train_mse)
+        avg_test_mse = np.mean(test_mse)
+        train_minus_test_mse.append(avg_test_mse - avg_train_mse)
+
+    return train_minus_test_mse
+
+def plot_kfold_results(k_values, ols_results, lasso_results, ridge_results):
+    plt.figure(figsize=(8, 6))
+    plt.plot(k_values, ols_results, label="OLS", marker="o")
+    plt.plot(k_values, lasso_results, label="Lasso", marker="o")
+    plt.plot(k_values, ridge_results, label="Ridge", marker="o")
+    plt.xlabel("Number of Folds (k)")
+    plt.ylabel("Test MSE - Train MSE")
+    plt.title("Cross-Validation Results")
+    plt.legend()
+    plt.grid()
+    plt.show()
+
+
 
 
 
@@ -299,4 +629,6 @@ def augment_df_with_norm_age(norm_age_df, ts062_df):
   for i in range(4, 13):
     ts062_df['col' + str(i-3) + '_proportion'] = ts062_df[ts062_df.columns[i]] / ts062_df[ts062_df.columns[3]]
   return ts062_df
+
+
 

@@ -20,6 +20,74 @@ import sqlite"""
 
 """Place commands in this file to access the data electronically. Don't remove any missing values, or deal with outliers. Make sure you have legalities correct, both intellectual property and personal data privacy rights. Beyond the legal side also think about the ethical issues around this data. """
 
+# final project Task 1
+
+
+
+def is_valid_wkt(wkt):
+    try:
+        loads(wkt)
+        return True
+    except WKTReadingError:
+        return False
+
+
+class NodeCollectorHandler(osm.SimpleHandler):
+    """First pass: Collect all node locations."""
+    def __init__(self):
+        super().__init__()
+        # self.all_node_locations = {}  # Dictionary to store all nodes with their coordinates
+        self.tagged_nodes = []  # To store nodes with at least one tag
+        self.cnt = 0
+
+    def node(self, n):
+        # Store all nodes for reference
+        # self.all_node_locations[n.id] = (n.location.lat, n.location.lon)
+
+        # Store tagged nodes
+        if n.tags:
+            self.tagged_nodes.append({
+                'id': n.id,
+                'lat': n.location.lat,
+                'lon': n.location.lon,
+                'tags': dict(n.tags)
+            })
+            self.cnt += 1
+            if (self.cnt % 1000 == 0):
+                print(str(self.cnt) + " nodes added")
+
+def process_osm_file_with_one_pass(osm_file, nodes_csv):
+    """
+    Process an OSM PBF file using a two-pass approach:
+    1. First pass: Collect all node locations and tagged nodes.
+    2. Second pass: Process ways and calculate average coordinates.
+
+    Parameters:
+        osm_file (str): Path to the OSM PBF file.
+        nodes_csv (str): Path to save the tagged nodes as a CSV file.
+        ways_csv (str): Path to save the ways with average coordinates as a CSV file.
+    """
+    print(f"Processing file: {osm_file}")
+
+    # First pass: Collect all nodes
+    print("First pass: Collecting nodes...")
+    node_handler = NodeCollectorHandler()
+    node_handler.apply_file(osm_file)
+
+    # Save tagged nodes to CSV
+    tagged_nodes_df = pd.DataFrame(node_handler.tagged_nodes)
+    tagged_nodes_df.to_csv(nodes_csv, index=False)
+    print(f"Tagged Nodes saved to {nodes_csv}")
+
+
+
+
+
+
+
+
+
+
 def data():
     """Read the data from the web or local file, returning structured format such as a data frame"""
     raise NotImplementedError
@@ -196,4 +264,6 @@ def download_census_data(code, base_dir=''):
 
 def load_census_data(code, level='msoa'):
   return pd.read_csv(f'census2021-{code.lower()}/census2021-{code.lower()}-{level}.csv')
+
+
 

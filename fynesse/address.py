@@ -27,6 +27,114 @@ from sklearn.linear_model import RidgeCV
 from sklearn.model_selection import KFold
 from sklearn.metrics import mean_squared_error, r2_score
 from sklearn.linear_model import LassoCV, RidgeCV
+from scipy.optimize import LinearConstraint, minimize
+
+# final project
+
+# task 1
+
+def estimate_students(latitude: float, longitude: float, W, scaler, model) -> float:
+    """
+    Args:
+    latitude (float): The latitude coordinate.
+    longitude (float): The longitude coordinate.
+    W
+    scaler
+    model: any nssec area model
+
+    Returns:
+    float: Estimated share of students in that area (value between 0 and 1).
+    """
+    point = Point(longitude, latitude) 
+    point_gdf = gpd.GeoDataFrame({'geometry': [point]}, crs="EPSG:4326")
+    point_gdf = point_gdf.to_crs("EPSG:27700")
+    result = gpd.sjoin(point_gdf, gdf_boundaries_2021_nssec_with_counts, how="left", predicate="within")
+    cols = prepare_features(tags_nssec_flattened, gdf_boundaries_2021_nssec_with_counts, "_by_area").columns
+    custom_X = pd.DataFrame(result[cols])
+    custom_X_scaled = scaler.transform(custom_X)
+    custom_X_scaled_with_const = np.insert(custom_X_scaled, 0, 1.0)
+    custom_X_transformed = np.dot(custom_X_scaled_with_const, W.T)
+    custom_X_transformed_with_const = np.insert(custom_X_transformed, 0, 1.0)
+    df_custom_X_transformed_with_const = pd.DataFrame(custom_X_transformed_with_const.reshape(1, -1), columns=list(model.feature_names_in_))
+    y_pred, _, _ = pred(df_custom_X_transformed_with_const, [result['L15_percentage'].iloc[0]], model)
+    return result['L15_percentage'].iloc[0], y_pred[0]
+
+def estimate_health(latitude: float, longitude: float, W, scaler, model) -> float:
+    """
+    Args:
+    latitude (float): The latitude coordinate.
+    longitude (float): The longitude coordinate.
+
+    Returns:
+    float: Estimated share of students in that area (value between 0 and 1).
+    """
+    point = Point(longitude, latitude)  
+    point_gdf = gpd.GeoDataFrame({'geometry': [point]}, crs="EPSG:4326")
+    point_gdf = point_gdf.to_crs("EPSG:27700")
+    result = gpd.sjoin(point_gdf, gdf_boundaries_2021_health_with_counts, how="left", predicate="within")
+    cols = prepare_features(tags_health_flattened, gdf_boundaries_2021_health_with_counts, "_by_area").columns
+    custom_X = pd.DataFrame(result[cols])
+    custom_X_scaled = scaler.transform(custom_X)
+    custom_X_scaled_with_const = np.insert(custom_X_scaled, 0, 1.0)
+    custom_X_transformed = np.dot(custom_X_scaled_with_const, W.T)
+    custom_X_transformed_with_const = np.insert(custom_X_transformed, 0, 1.0)
+    df_custom_X_transformed_with_const = pd.DataFrame(custom_X_transformed_with_const.reshape(1, -1), columns=list(model.feature_names_in_))
+    y_pred, _, _ = pred(df_custom_X_transformed_with_const, [result['very_good_percentage'].iloc[0]], model)
+    return result['very_good_percentage'].iloc[0], y_pred[0]
+
+
+# task 2
+
+def optimise_new_features_with_pca_indices(
+    old_features_unscaled, old_feature_indices, new_feature_indices, scaler, W, model, bounds_unscaled, constraints
+):
+    beta = model.coef_
+    feature_names = scaler.feature_names_in_
+    
+    def prepare_full_features(old_features, new_features):
+        """Helper function to construct and scale the full feature vector."""
+        full_features_unscaled = np.zeros(len(feature_names))
+        full_features_unscaled[old_feature_indices] = old_features
+        full_features_unscaled[new_feature_indices] = new_features
+        full_features_unscaled_df = pd.DataFrame([full_features_unscaled], columns=feature_names)
+        full_features_scaled = scaler.transform(full_features_unscaled_df)[0]
+        full_features_scaled_with_const = np.insert(full_features_scaled, 0, 1.0)
+        return full_features_scaled_with_const
+
+    def objective(new_features_unscaled):
+        full_features_scaled_with_const = prepare_full_features(old_features_unscaled, new_features_unscaled)
+        transformed_features = np.dot(full_features_scaled_with_const, W.T)  # Map to PCA space
+        transformed_features_with_const = np.insert(transformed_features, 0, 1.0)
+        return -np.dot(transformed_features_with_const, beta)  # Negative to maximise
+
+    # Initial guess for new features (middle of bounds)
+    x0 = np.array([(low + high) / 2 for low, high in bounds_unscaled])
+
+    # Perform optimisation
+    result = minimize(objective, x0, bounds=bounds_unscaled, constraints=constraints, method='SLSQP')
+
+    if result.success:
+        # Optimised new features
+        optimal_new_features = result.x
+
+        # Calculate the maximised y
+        full_features_scaled_with_const = prepare_full_features(old_features_unscaled, optimal_new_features)
+        transformed_features = np.dot(full_features_scaled_with_const, W.T)
+        transformed_features_with_const = np.insert(transformed_features, 0, 1.0)
+        maximised_y = np.dot(transformed_features_with_const, beta)
+
+        return optimal_new_features, maximised_y
+    else:
+        raise ValueError("Optimisation failed:", result.message)
+
+
+def get_predictions(latitude: float, longitude: float):
+    point = Point(longitude, latitude) 
+    point_gdf = gpd.GeoDataFrame({'geometry': [point]}, crs="EPSG:4326")
+    point_gdf = point_gdf.to_crs("EPSG:27700")
+    result = gpd.sjoin(point_gdf, df_final, how="left", predicate="within")
+    return result
+
 
 # Prac 3 Question 1
 
